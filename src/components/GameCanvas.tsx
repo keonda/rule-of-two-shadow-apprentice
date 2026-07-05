@@ -32,6 +32,20 @@ export default function GameCanvas({
   const [joystickPos, setJoystickPos] = useState({ x: 0, y: 0 });
   const [isMobile, setIsMobile] = useState(false);
 
+  // Use refs to prevent callbacks from re-triggering the main game loop initialization
+  const onGameStatsRef = useRef(onGameStats);
+  const onUpgradeChoiceRef = useRef(onUpgradeChoice);
+  const onMasterTrialDefeatedRef = useRef(onMasterTrialDefeated);
+  const onGameOverRef = useRef(onGameOver);
+
+  // Sync callbacks to refs on every render
+  useEffect(() => {
+    onGameStatsRef.current = onGameStats;
+    onUpgradeChoiceRef.current = onUpgradeChoice;
+    onMasterTrialDefeatedRef.current = onMasterTrialDefeated;
+    onGameOverRef.current = onGameOver;
+  });
+
   // Resize canvas handler
   useEffect(() => {
     const handleResize = () => {
@@ -64,27 +78,27 @@ export default function GameCanvas({
     const game = new ShadowApprenticeGame(
       canvas,
       (stats, health, energy, score, wave) => {
-        onGameStats(stats, health, energy, score, wave);
+        onGameStatsRef.current(stats, health, energy, score, wave);
       },
       () => {
         // Wave complete - trigger upgrade choice
         const choices = game.getUpgradeOptions();
-        onUpgradeChoice(choices);
+        onUpgradeChoiceRef.current(choices);
         game.setPaused(true);
       },
       () => {
         // Master Trial Defeated!
-        onMasterTrialDefeated();
-        // Wait 2.5s for effects before showing upgrades
+        onMasterTrialDefeatedRef.current();
+        // Wait 2.2s for effects before showing upgrades
         setTimeout(() => {
           if (!gameRef.current) return;
           const choices = gameRef.current.getUpgradeOptions();
-          onUpgradeChoice(choices);
+          onUpgradeChoiceRef.current(choices);
           gameRef.current.setPaused(true);
         }, 2200);
       },
       (score, wave, upgrades) => {
-        onGameOver(score, wave, upgrades);
+        onGameOverRef.current(score, wave, upgrades);
       }
     );
 
@@ -107,7 +121,7 @@ export default function GameCanvas({
       applyUpgradeRef.current = null;
       resumeNextWaveRef.current = null;
     };
-  }, [onGameStats, onUpgradeChoice, onMasterTrialDefeated, onGameOver, applyUpgradeRef, resumeNextWaveRef]);
+  }, [applyUpgradeRef, resumeNextWaveRef]);
 
   // Handle outside pause toggling
   useEffect(() => {
