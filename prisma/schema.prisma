@@ -1,0 +1,36 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String        @id @default(uuid())
+  username     String        @unique
+  createdAt    DateTime      @default(now())
+  sessions     GameSession[]
+  highScores   HighScore[]
+}
+
+model GameSession {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  score            Int
+  waveReached      Int
+  selectedUpgrades String[] // Array of chosen upgrades (Prisma supports String[] in PostgreSQL)
+  result           String   // "WIN" or "LOSS"
+  commentary       String?  // LLM generated or fallback commentary
+  createdAt        DateTime @default(now())
+}
+
+model HighScore {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  score       Int
+  waveReached Int
+  createdAt   DateTime @default(now())
+}
