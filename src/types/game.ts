@@ -103,3 +103,29 @@ export interface GameUpgrade {
   description: string;
   effect: (stats: PlayerStats) => PlayerStats;
 }
+
+export interface Canister {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  isMoving: boolean;
+}
+
+export interface Hazard {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  damage: number;
+}
+
+export interface Wall {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}

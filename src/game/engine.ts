@@ -1,4 +1,4 @@
-import { Enemy, EnemyType, Particle, PlayerStats, Projectile, Position } from '../types/game';
+import { Enemy, EnemyType, Particle, PlayerStats, Projectile, Position, Canister, Hazard, Wall } from '../types/game';
 import { audioManager } from './audio';
 
 export class ShadowApprenticeGame {
@@ -22,6 +22,9 @@ export class ShadowApprenticeGame {
   private enemies: Enemy[] = [];
   private projectiles: Projectile[] = [];
   private particles: Particle[] = [];
+  private canisters: Canister[] = [];
+  private hazards: Hazard[] = [];
+  private walls: Wall[] = [];
   
   // Cooldown Trackers (in frames or ms; we will use time-based or frame-based, frame-based is easy for 60fps)
   // Let's use timestamp based or simple frame counters. Let's use simple frame counters at 60 FPS.
@@ -223,6 +226,15 @@ export class ShadowApprenticeGame {
     this.projectiles = [];
     this.spawnTimer = 0;
     this.enemiesSpawned = 0;
+
+    // Generate room layouts / walls
+    this.generateWalls();
+
+    // Generate hazards
+    this.generateHazards();
+
+    // Generate canisters
+    this.generateCanisters();
     
     audioManager.setWave(this.wave);
     audioManager.startSoundtrack();
@@ -341,6 +353,26 @@ export class ShadowApprenticeGame {
         type: 'vortex'
       });
     }
+
+    // Apply pushback to canisters
+    this.canisters.forEach(c => {
+      const dx = c.x - this.playerX;
+      const dy = c.y - this.playerY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < baseRadius) {
+        const angleToCanister = Math.atan2(dy, dx);
+        let angleDiff = Math.abs(angleToCanister - pushAngle);
+        while (angleDiff > Math.PI) angleDiff = Math.abs(angleDiff - Math.PI * 2);
+
+        if (angleDiff < coneAngle) {
+          const launchSpeed = 16 + this.playerStats.voidPushLevel * 3;
+          c.vx = Math.cos(angleToCanister) * launchSpeed;
+          c.vy = Math.sin(angleToCanister) * launchSpeed;
+          c.isMoving = true;
+        }
+      }
+    });
 
     // Apply pushback to enemies
     this.enemies.forEach(enemy => {
@@ -521,6 +553,16 @@ export class ShadowApprenticeGame {
     let spawnX = this.playerX + Math.cos(angle) * distance;
     let spawnY = this.playerY + Math.sin(angle) * distance;
 
+    // Ensure it doesn't spawn inside a wall
+    let wallAttempts = 0;
+    while (this.isPositionInsideWall(spawnX, spawnY, radius) && wallAttempts < 10) {
+      const newAngle = Math.random() * Math.PI * 2;
+      const newDistance = 500 + Math.random() * 100;
+      spawnX = this.playerX + Math.cos(newAngle) * newDistance;
+      spawnY = this.playerY + Math.sin(newAngle) * newDistance;
+      wallAttempts++;
+    }
+
     // Clamp inside arena boundaries
     spawnX = Math.max(radius, Math.min(this.arenaWidth - radius, spawnX));
     spawnY = Math.max(radius, Math.min(this.arenaHeight - radius, spawnY));
@@ -694,6 +736,8 @@ export class ShadowApprenticeGame {
     this.updatePlayerMovement();
     this.updateEnemies();
     this.updateProjectiles();
+    this.updateCanisters();
+    this.updateHazards();
     this.updateParticles();
     this.updateCamera();
     this.handleWaveSpawner();
@@ -802,6 +846,12 @@ export class ShadowApprenticeGame {
       }
     }
 
+    // Check wall collisions for player
+    const playerObj = { x: this.playerX, y: this.playerY, radius: this.playerRadius };
+    this.handleWallCollision(playerObj);
+    this.playerX = playerObj.x;
+    this.playerY = playerObj.y;
+
     // Bound player to Arena
     this.playerX = Math.max(this.playerRadius, Math.min(this.arenaWidth - this.playerRadius, this.playerX));
     this.playerY = Math.max(this.playerRadius, Math.min(this.arenaHeight - this.playerRadius, this.playerY));
@@ -905,6 +955,9 @@ export class ShadowApprenticeGame {
         }
       }
 
+      // Check wall collisions for enemies
+      this.handleWallCollision(enemy);
+
       // Clamp to arena
       enemy.x = Math.max(enemy.radius, Math.min(this.arenaWidth - enemy.radius, enemy.x));
       enemy.y = Math.max(enemy.radius, Math.min(this.arenaHeight - enemy.radius, enemy.y));
@@ -968,10 +1021,18 @@ export class ShadowApprenticeGame {
       p.y += p.vy;
     });
 
-    // Remove off-screen or out-of-arena projectles
-    this.projectiles = this.projectiles.filter(p => 
-      p.x >= 0 && p.x <= this.arenaWidth && p.y >= 0 && p.y <= this.arenaHeight
-    );
+    // Remove off-screen, out-of-arena, or wall-collided projectiles
+    this.projectiles = this.projectiles.filter(p => {
+      const insideArena = p.x >= 0 && p.x <= this.arenaWidth && p.y >= 0 && p.y <= this.arenaHeight;
+      if (!insideArena) return false;
+      
+      if (this.isPositionInsideWall(p.x, p.y, p.radius)) {
+        this.spawnHitParticles(p.x, p.y, p.color, 4);
+        return false;
+      }
+      
+      return true;
+    });
   }
 
   private updateParticles() {
@@ -1242,6 +1303,9 @@ export class ShadowApprenticeGame {
     this.ctx.translate(-this.cameraX, -this.cameraY);
 
     this.drawArena();
+    this.drawHazards();
+    this.drawCanisters();
+    this.drawWalls();
     this.drawParticles();
     this.drawProjectiles();
     this.drawEnemies();
@@ -1708,5 +1772,356 @@ export class ShadowApprenticeGame {
 
   public fireLeapMobile() {
     this.triggerLeap();
+  }
+
+  // ==========================================
+  // ENVIRONMENTAL STUFF (Walls, Hazards, Canisters)
+  // ==========================================
+  
+  private generateWalls() {
+    this.walls = [];
+    if (this.wave < 5) return;
+
+    // Room Layout 1 (Central pillars + barriers)
+    // Left barrier
+    this.walls.push({
+      x: 350,
+      y: 100,
+      width: 30,
+      height: 250
+    });
+
+    // Right barrier
+    this.walls.push({
+      x: 820,
+      y: 550,
+      width: 30,
+      height: 250
+    });
+
+    // Center divider
+    this.walls.push({
+      x: 520,
+      y: 420,
+      width: 160,
+      height: 60
+    });
+  }
+
+  private generateHazards() {
+    this.hazards = [];
+    const numHazards = 3 + Math.floor(Math.random() * 3);
+    
+    for (let i = 0; i < numHazards; i++) {
+      let hX = 150 + Math.random() * (this.arenaWidth - 350);
+      let hY = 150 + Math.random() * (this.arenaHeight - 350);
+      
+      // Make sure it doesn't overlap player spawn or walls
+      let attempts = 0;
+      while ((Math.abs(hX - this.playerX) < 150 && Math.abs(hY - this.playerY) < 150) || 
+             (this.isPositionInsideWall(hX + 40, hY + 40, 50) && attempts < 15)) {
+        hX = 150 + Math.random() * (this.arenaWidth - 350);
+        hY = 150 + Math.random() * (this.arenaHeight - 350);
+        attempts++;
+      }
+
+      this.hazards.push({
+        id: Math.random().toString(),
+        x: hX,
+        y: hY,
+        width: 70 + Math.random() * 50,
+        height: 70 + Math.random() * 50,
+        damage: 0.20 // 0.2 damage tick per frame
+      });
+    }
+  }
+
+  private generateCanisters() {
+    this.canisters = [];
+    const numCanisters = 4 + Math.floor(Math.random() * 3);
+    
+    for (let i = 0; i < numCanisters; i++) {
+      let cX = 120 + Math.random() * (this.arenaWidth - 240);
+      let cY = 120 + Math.random() * (this.arenaHeight - 240);
+      
+      // Make sure it doesn't overlap player spawn or walls
+      let attempts = 0;
+      while ((Math.abs(cX - this.playerX) < 100 && Math.abs(cY - this.playerY) < 100) || 
+             (this.isPositionInsideWall(cX, cY, 20) && attempts < 15)) {
+        cX = 120 + Math.random() * (this.arenaWidth - 240);
+        cY = 120 + Math.random() * (this.arenaHeight - 240);
+        attempts++;
+      }
+
+      this.canisters.push({
+        id: Math.random().toString(),
+        x: cX,
+        y: cY,
+        vx: 0,
+        vy: 0,
+        radius: 12,
+        isMoving: false
+      });
+    }
+  }
+
+  private isPositionInsideWall(x: number, y: number, radius: number): boolean {
+    for (let i = 0; i < this.walls.length; i++) {
+      const w = this.walls[i];
+      const closestX = Math.max(w.x, Math.min(x, w.x + w.width));
+      const closestY = Math.max(w.y, Math.min(y, w.y + w.height));
+      const dx = x - closestX;
+      const dy = y - closestY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < radius) return true;
+    }
+    return false;
+  }
+
+  private handleWallCollision(entity: { x: number; y: number; radius: number }, bounce: boolean = false, vxRef?: { vx: number }, vyRef?: { vy: number }) {
+    this.walls.forEach(wall => {
+      const closestX = Math.max(wall.x, Math.min(entity.x, wall.x + wall.width));
+      const closestY = Math.max(wall.y, Math.min(entity.y, wall.y + wall.height));
+      
+      const dx = entity.x - closestX;
+      const dy = entity.y - closestY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < entity.radius) {
+        const overlap = entity.radius - dist;
+        if (dist === 0) {
+          entity.x += entity.radius;
+          return;
+        }
+
+        const pushX = (dx / dist) * overlap;
+        const pushY = (dy / dist) * overlap;
+        
+        entity.x += pushX;
+        entity.y += pushY;
+
+        if (bounce && vxRef && vyRef) {
+          // Bounce off wall faces by flipping velocities
+          if (Math.abs(closestX - wall.x) < 2 || Math.abs(closestX - (wall.x + wall.width)) < 2) {
+            vxRef.vx *= -0.8;
+          }
+          if (Math.abs(closestY - wall.y) < 2 || Math.abs(closestY - (wall.y + wall.height)) < 2) {
+            vyRef.vy *= -0.8;
+          }
+        }
+      }
+    });
+  }
+
+  private updateHazards() {
+    this.hazards.forEach(h => {
+      // Player damage tick
+      if (this.playerX > h.x && this.playerX < h.x + h.width &&
+          this.playerY > h.y && this.playerY < h.y + h.height) {
+        this.damagePlayer(h.damage, 'contact');
+        
+        if (Math.random() < 0.1) {
+          this.particles.push({
+            id: Math.random().toString(),
+            x: this.playerX + (Math.random() - 0.5) * 15,
+            y: this.playerY + (Math.random() - 0.5) * 15,
+            vx: (Math.random() - 0.5) * 1,
+            vy: -Math.random() * 2,
+            radius: 1.5,
+            color: '#f97316',
+            alpha: 0.8,
+            decay: 0.05,
+            type: 'spark'
+          });
+        }
+      }
+
+      // Enemies damage tick
+      this.enemies.forEach(enemy => {
+        if (enemy.x > h.x && enemy.x < h.x + h.width &&
+            enemy.y > h.y && enemy.y < h.y + h.height) {
+          enemy.health -= h.damage * 0.4;
+          if (Math.random() < 0.05) {
+            this.spawnHitParticles(enemy.x, enemy.y, '#f97316', 1);
+          }
+        }
+      });
+    });
+  }
+
+  private updateCanisters() {
+    this.canisters = this.canisters.filter(c => {
+      c.x += c.vx;
+      c.y += c.vy;
+      c.vx *= 0.95;
+      c.vy *= 0.95;
+
+      const speed = Math.sqrt(c.vx * c.vx + c.vy * c.vy);
+      if (speed < 0.1) {
+        c.vx = 0;
+        c.vy = 0;
+        c.isMoving = false;
+      }
+
+      // Wall bounce collision
+      const velX = { vx: c.vx };
+      const velY = { vy: c.vy };
+      this.handleWallCollision(c, true, velX, velY);
+      c.vx = velX.vx;
+      c.vy = velY.vy;
+
+      c.x = Math.max(c.radius, Math.min(this.arenaWidth - c.radius, c.x));
+      c.y = Math.max(c.radius, Math.min(this.arenaHeight - c.radius, c.y));
+
+      // Player pushing canister
+      const pDx = c.x - this.playerX;
+      const pDy = c.y - this.playerY;
+      const pDist = Math.sqrt(pDx * pDx + pDy * pDy);
+      if (pDist < this.playerRadius + c.radius) {
+        const pAngle = Math.atan2(pDy, pDx);
+        const pushForce = 3;
+        c.vx = Math.cos(pAngle) * pushForce;
+        c.vy = Math.sin(pAngle) * pushForce;
+        c.isMoving = true;
+      }
+
+      // Check enemy impacts when moving quickly
+      if (speed > 3) {
+        for (let i = 0; i < this.enemies.length; i++) {
+          const enemy = this.enemies[i];
+          const eDx = c.x - enemy.x;
+          const eDy = c.y - enemy.y;
+          const eDist = Math.sqrt(eDx * eDx + eDy * eDy);
+
+          if (eDist < c.radius + enemy.radius) {
+            this.triggerCanisterExplosion(c.x, c.y);
+            return false; // remove canister
+          }
+        }
+      }
+
+      return true;
+    });
+  }
+
+  private triggerCanisterExplosion(x: number, y: number) {
+    this.screenShakeIntensity = Math.min(10, this.screenShakeIntensity + 5);
+    
+    // Spawn orange/red hit sparks
+    this.spawnHitParticles(x, y, '#ef4444', 15);
+    this.spawnHitParticles(x, y, '#f97316', 10);
+    this.spawnHitParticles(x, y, '#fbbf24', 5);
+
+    // Splash damage
+    const splashRadius = 90;
+    this.enemies.forEach(enemy => {
+      const dx = enemy.x - x;
+      const dy = enemy.y - y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < splashRadius) {
+        const damage = 65 * (1 - dist / splashRadius);
+        enemy.health -= damage;
+        
+        const angle = Math.atan2(dy, dx);
+        enemy.pushBackX = Math.cos(angle) * 9;
+        enemy.pushBackY = Math.sin(angle) * 9;
+        enemy.pushBackDuration = 15;
+      }
+    });
+  }
+
+  private drawWalls() {
+    this.walls.forEach(w => {
+      this.ctx.save();
+      
+      this.ctx.fillStyle = '#0b0f19';
+      this.ctx.fillRect(w.x, w.y, w.width, w.height);
+      
+      this.ctx.strokeStyle = '#7c3aed';
+      this.ctx.lineWidth = 3;
+      this.ctx.shadowBlur = 8;
+      this.ctx.shadowColor = '#8b5cf6';
+      this.ctx.strokeRect(w.x, w.y, w.width, w.height);
+      
+      this.ctx.strokeStyle = '#311059';
+      this.ctx.lineWidth = 1;
+      this.ctx.beginPath();
+      this.ctx.moveTo(w.x + 5, w.y + 5);
+      this.ctx.lineTo(w.x + w.width - 5, w.y + w.height - 5);
+      this.ctx.stroke();
+      
+      this.ctx.restore();
+    });
+  }
+
+  private drawHazards() {
+    this.hazards.forEach(h => {
+      this.ctx.save();
+      
+      const pulse = 0.5 + Math.sin(Date.now() * 0.005) * 0.2;
+      this.ctx.strokeStyle = `rgba(239, 68, 68, ${pulse})`;
+      this.ctx.lineWidth = 2.5;
+      this.ctx.shadowBlur = 10;
+      this.ctx.shadowColor = '#ef4444';
+      
+      this.ctx.strokeRect(h.x, h.y, h.width, h.height);
+      
+      this.ctx.fillStyle = `rgba(220, 38, 38, 0.06)`;
+      this.ctx.fillRect(h.x, h.y, h.width, h.height);
+
+      if (Math.random() < 0.05) {
+        const fx = h.x + Math.random() * h.width;
+        const fy = h.y + Math.random() * h.height;
+        this.particles.push({
+          id: Math.random().toString(),
+          x: fx,
+          y: fy,
+          vx: 0,
+          vy: -0.3 - Math.random() * 0.5,
+          radius: 1 + Math.random() * 1.5,
+          color: Math.random() < 0.5 ? '#f97316' : '#ef4444',
+          alpha: 0.7,
+          decay: 0.03,
+          type: 'spark'
+        });
+      }
+      
+      this.ctx.restore();
+    });
+  }
+
+  private drawCanisters() {
+    this.canisters.forEach(c => {
+      this.ctx.save();
+      this.ctx.translate(c.x, c.y);
+
+      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      this.ctx.beginPath();
+      this.ctx.arc(0, 4, c.radius, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      const grad = this.ctx.createLinearGradient(-c.radius, 0, c.radius, 0);
+      grad.addColorStop(0, '#374151');
+      grad.addColorStop(0.5, '#9ca3af');
+      grad.addColorStop(1, '#1f2937');
+      this.ctx.fillStyle = grad;
+      
+      this.ctx.beginPath();
+      this.ctx.arc(0, 0, c.radius, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.strokeStyle = '#111827';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.stroke();
+
+      this.ctx.fillStyle = '#c084fc';
+      this.ctx.shadowBlur = 10;
+      this.ctx.shadowColor = '#a855f7';
+      this.ctx.beginPath();
+      this.ctx.arc(0, 0, c.radius * 0.4, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      this.ctx.restore();
+    });
   }
 }
