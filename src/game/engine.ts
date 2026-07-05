@@ -1780,7 +1780,7 @@ export class ShadowApprenticeGame {
   
   private generateWalls() {
     this.walls = [];
-    if (this.wave < 5) return;
+    if (this.wave < 10) return;
 
     // Room Layout 1 (Central pillars + barriers)
     // Left barrier
@@ -1810,6 +1810,8 @@ export class ShadowApprenticeGame {
 
   private generateHazards() {
     this.hazards = [];
+    if (this.wave < 10) return; // Env hazards start at Wave 10+
+    
     const numHazards = 3 + Math.floor(Math.random() * 3);
     
     for (let i = 0; i < numHazards; i++) {
@@ -1819,7 +1821,7 @@ export class ShadowApprenticeGame {
       // Make sure it doesn't overlap player spawn or walls
       let attempts = 0;
       while ((Math.abs(hX - this.playerX) < 150 && Math.abs(hY - this.playerY) < 150) || 
-             (this.isPositionInsideWall(hX + 40, hY + 40, 50) && attempts < 15)) {
+             (this.isPositionInsideWall(hX + 20, hY + 20, 30) && attempts < 15)) {
         hX = 150 + Math.random() * (this.arenaWidth - 350);
         hY = 150 + Math.random() * (this.arenaHeight - 350);
         attempts++;
@@ -1829,16 +1831,18 @@ export class ShadowApprenticeGame {
         id: Math.random().toString(),
         x: hX,
         y: hY,
-        width: 70 + Math.random() * 50,
-        height: 70 + Math.random() * 50,
-        damage: 0.20 // 0.2 damage tick per frame
+        width: 35 + Math.random() * 25, // Smaller hazards
+        height: 35 + Math.random() * 25, // Smaller hazards
+        damage: 0.20
       });
     }
   }
 
   private generateCanisters() {
     this.canisters = [];
-    const numCanisters = 4 + Math.floor(Math.random() * 3);
+    if (this.wave < 10) return; // Canisters start at Wave 10+
+    
+    const numCanisters = 3 + Math.floor(Math.random() * 2);
     
     for (let i = 0; i < numCanisters; i++) {
       let cX = 120 + Math.random() * (this.arenaWidth - 240);
@@ -1847,7 +1851,7 @@ export class ShadowApprenticeGame {
       // Make sure it doesn't overlap player spawn or walls
       let attempts = 0;
       while ((Math.abs(cX - this.playerX) < 100 && Math.abs(cY - this.playerY) < 100) || 
-             (this.isPositionInsideWall(cX, cY, 20) && attempts < 15)) {
+             (this.isPositionInsideWall(cX, cY, 15) && attempts < 15)) {
         cX = 120 + Math.random() * (this.arenaWidth - 240);
         cY = 120 + Math.random() * (this.arenaHeight - 240);
         attempts++;
@@ -1859,7 +1863,7 @@ export class ShadowApprenticeGame {
         y: cY,
         vx: 0,
         vy: 0,
-        radius: 12,
+        radius: 8, // Smaller radius
         isMoving: false
       });
     }
