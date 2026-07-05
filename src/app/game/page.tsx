@@ -27,6 +27,7 @@ export default function GamePage() {
   const [upgradeChoices, setUpgradeChoices] = useState<{ id: string; name: string; description: string }[] | null>(null);
   const [showTrialVictory, setShowTrialVictory] = useState(false);
   const [gameOverData, setGameOverData] = useState<{ score: number; wave: number; upgrades: string[] } | null>(null);
+  const [comboCount, setComboCount] = useState(0);
 
   // API Call state
   const [savingScore, setSavingScore] = useState(false);
@@ -76,13 +77,15 @@ export default function GamePage() {
     currentHealth: number,
     currentEnergy: number,
     currentScore: number,
-    currentWave: number
+    currentWave: number,
+    currentComboCount: number
   ) => {
     setGameStats(stats);
     setHealth(currentHealth);
     setEnergy(currentEnergy);
     setScore(currentScore);
     setWave(currentWave);
+    setComboCount(currentComboCount);
   };
 
   // Wave complete -> Show upgrades
@@ -247,6 +250,23 @@ export default function GamePage() {
       </div>
 
       {/* GAME RUNETIME OVERLAYS */}
+      
+      {/* Combo Meter / Dark Rage */}
+      {comboCount > 0 && (
+        <div className="absolute bottom-28 left-1/2 transform -translate-x-1/2 bg-slate-900/90 border border-red-500/40 p-3 rounded-2xl text-center pointer-events-auto min-w-[180px] shadow-xl shadow-red-950/20 z-30 animate-pulse">
+          <p className="text-[10px] text-red-500 uppercase tracking-widest font-black">Dark Rage</p>
+          <div className="flex justify-center items-baseline gap-1 mt-0.5">
+            <span className="text-2xl font-extrabold text-red-400 font-mono">x{comboCount}</span>
+            <span className="text-xs text-slate-400">+{comboCount}% DMG</span>
+          </div>
+          <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden border border-slate-800 mt-2">
+            <div
+              className="bg-red-500 h-full rounded-full transition-all duration-75"
+              style={{ width: `${(comboCount / 50) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* 1. Trial Victory Celebration */}
       {showTrialVictory && (

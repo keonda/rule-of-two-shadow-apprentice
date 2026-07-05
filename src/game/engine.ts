@@ -6,7 +6,7 @@ export class ShadowApprenticeGame {
   private ctx: CanvasRenderingContext2D;
   
   // Callbacks
-  private onStatsChange: (stats: PlayerStats, currentHealth: number, currentEnergy: number, score: number, wave: number) => void;
+  private onStatsChange: (stats: PlayerStats, currentHealth: number, currentEnergy: number, score: number, wave: number, comboCount: number) => void;
   private onGameOver: (score: number, wave: number, upgrades: string[]) => void;
   private onUpgradeChoice: () => void;
   private onMasterTrialDefeated: () => void;
@@ -56,6 +56,10 @@ export class ShadowApprenticeGame {
   private enemiesToSpawn: number = 0;
   private enemiesRemaining: number = 0;
   private enemiesSpawned: number = 0;
+  
+  // Combo mechanics
+  public comboCount: number = 0;
+  private comboDecayTimer: number = 0;
   private spawnInterval: number = 120; // frames between spawns (2 seconds)
   private spawnTimer: number = 0;
   private currentUpgradesSelected: string[] = [];
@@ -72,7 +76,7 @@ export class ShadowApprenticeGame {
 
   constructor(
     canvas: HTMLCanvasElement,
-    onStatsChange: (stats: PlayerStats, currentHealth: number, currentEnergy: number, score: number, wave: number) => void,
+    onStatsChange: (stats: PlayerStats, currentHealth: number, currentEnergy: number, score: number, wave: number, comboCount: number) => void,
     onUpgradeChoice: () => void,
     onMasterTrialDefeated: () => void,
     onGameOver: (score: number, wave: number, upgrades: string[]) => void
@@ -223,13 +227,19 @@ export class ShadowApprenticeGame {
     this.triggerStatsCallback();
   }
 
+  private incrementCombo(amount: number) {
+    this.comboCount = Math.min(50, this.comboCount + amount);
+    this.comboDecayTimer = 0;
+  }
+
   private triggerStatsCallback() {
     this.onStatsChange(
       this.playerStats,
       this.playerHealth,
       this.playerEnergy,
       this.score,
-      this.wave
+      this.wave,
+      this.comboCount
     );
   }
 
@@ -315,9 +325,11 @@ export class ShadowApprenticeGame {
           enemy.pushBackY = Math.sin(angleToEnemy) * pushForce;
           enemy.pushBackDuration = 20; // 20 frames of stun/push
           
-          const damage = 5 * this.playerStats.voidPushLevel;
+          const comboMult = 1 + (this.comboCount * 0.01);
+          const damage = 5 * this.playerStats.voidPushLevel * comboMult;
           enemy.health -= damage;
           
+          this.incrementCombo(1);
           this.spawnHitParticles(enemy.x, enemy.y, 'purple', 8);
         }
       }
@@ -393,8 +405,11 @@ export class ShadowApprenticeGame {
       const enemy = nextTarget.enemy;
       hitEnemies.add(enemy.id);
 
-      // Apply damage
-      enemy.health -= lightningDmg;
+      // Apply damage with combo multiplier
+      const comboMult = 1 + (this.comboCount * 0.01);
+      enemy.health -= lightningDmg * comboMult;
+      
+      this.incrementCombo(1);
 
       // Spawn lightning particle
       this.spawnLightningArc(prevSource, enemy);
@@ -610,6 +625,16 @@ export class ShadowApprenticeGame {
       this.playerEnergy + baseEnergyRegen * energyRegenMultiplier
     );
 
+    // Decay combo over time
+    if (this.comboCount > 0) {
+      this.comboDecayTimer++;
+      if (this.comboDecayTimer >= 120) { // 2 seconds of inactivity
+        if (this.comboDecayTimer % 6 === 0) {
+          this.comboCount--;
+        }
+      }
+    }
+
     this.updatePlayerMovement();
     this.updateEnemies();
     this.updateProjectiles();
@@ -642,7 +667,8 @@ export class ShadowApprenticeGame {
 
       // Check collision and damage enemies during leap
       const hitRadius = this.playerRadius + 15; // slightly wider hit zone
-      const leapDmg = 25 * this.playerStats.leapLevel;
+      const comboMult = 1 + (this.comboCount * 0.01);
+      const leapDmg = 25 * this.playerStats.leapLevel * comboMult;
       
       this.enemies.forEach(enemy => {
         if (this.leapHitEnemies.has(enemy.id)) return;
@@ -654,6 +680,7 @@ export class ShadowApprenticeGame {
         if (dist < hitRadius + enemy.radius) {
           enemy.health -= leapDmg;
           this.leapHitEnemies.add(enemy.id);
+          this.incrementCombo(2); // Leap hits add 2 to combo
           
           // Pushback enemy slightly away from the leap path
           const pushAngle = Math.atan2(dy, dx);
@@ -686,8 +713,10 @@ export class ShadowApprenticeGame {
         dy /= length;
       }
 
-      this.playerX += dx * this.playerStats.speed;
-      this.playerY += dy * this.playerStats.speed;
+      // Apply speed boost from combo (+0.5% per combo point, max +25% speed)
+      const comboSpeedBoost = 1 + (this.comboCount * 0.005);
+      this.playerX += dx * this.playerStats.speed * comboSpeedBoost;
+      this.playerY += dy * this.playerStats.speed * comboSpeedBoost;
 
       // Auto-fire Shadow Lightning when holding down left mouse click
       if (this.mouseClicked) {
@@ -949,6 +978,17 @@ export class ShadowApprenticeGame {
         this.score += enemy.scoreValue;
         this.spawnHitParticles(enemy.x, enemy.y, '#ef4444', 20);
         audioManager.playEnemyHurt();
+
+        // 1. Health regeneration on kill (+2 HP baseline, scaling with health level)
+        const healAmt = 2 + (this.playerStats.healthLevel - 1) * 1.5;
+        this.playerHealth = Math.min(this.playerStats.maxHealth, this.playerHealth + healAmt);
+
+        // Life siphon particle effect (glowing pinkish purple sparks siphoning into player)
+        this.spawnHitParticles(this.playerX, this.playerY, '#ec4899', 6);
+
+        // 2. Increment Dark Rage Combo
+        this.incrementCombo(5);
+
         return false;
       }
       return true;
