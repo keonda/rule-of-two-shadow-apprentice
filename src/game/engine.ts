@@ -227,14 +227,24 @@ export class ShadowApprenticeGame {
     this.spawnTimer = 0;
     this.enemiesSpawned = 0;
 
-    // Generate room layouts / walls
-    this.generateWalls();
-
-    // Generate hazards
-    this.generateHazards();
-
-    // Generate canisters
-    this.generateCanisters();
+    const isNewTier = this.wave === 1 || (this.wave - 1) % 3 === 0;
+    if (isNewTier) {
+      this.generateWalls();
+      this.generateHazards();
+      this.generateCanisters();
+    } else {
+      // Within the same tier, canisters replenish to make sure there is ammo, but walls/hazards persist
+      if (this.canisters.length < 2) {
+        this.generateCanisters();
+      } else {
+        // Stop any currently moving canisters
+        this.canisters.forEach(c => {
+          c.vx = 0;
+          c.vy = 0;
+          c.isMoving = false;
+        });
+      }
+    }
     
     audioManager.setWave(this.wave);
     audioManager.startSoundtrack();
@@ -1810,7 +1820,7 @@ export class ShadowApprenticeGame {
 
   private generateHazards() {
     this.hazards = [];
-    if (this.wave < 10) return; // Env hazards start at Wave 10+
+    if (this.wave < 7) return; // Env hazards start at Wave 7+
     
     const numHazards = 3 + Math.floor(Math.random() * 3);
     
@@ -1840,7 +1850,7 @@ export class ShadowApprenticeGame {
 
   private generateCanisters() {
     this.canisters = [];
-    if (this.wave < 10) return; // Canisters start at Wave 10+
+    if (this.wave < 4) return; // Canisters start at Wave 4+
     
     const numCanisters = 3 + Math.floor(Math.random() * 2);
     
