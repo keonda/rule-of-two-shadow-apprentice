@@ -1090,7 +1090,7 @@ export class ShadowApprenticeGame {
 
         if (dist < proj.radius + this.playerRadius) {
           // Player hit!
-          this.damagePlayer(proj.damage);
+          this.damagePlayer(proj.damage, 'projectile');
           this.spawnHitParticles(this.playerX, this.playerY, '#a855f7', 15);
           return false; // remove projectile
         }
@@ -1123,7 +1123,7 @@ export class ShadowApprenticeGame {
 
       if (dist < enemy.radius + this.playerRadius) {
         // Player gets hit by contact
-        this.damagePlayer(enemy.damage * 0.05); // low contact damage per frame
+        this.damagePlayer(enemy.damage * 0.05, 'contact');
         
         // Push enemy back slightly so they don't stick completely
         const angle = Math.atan2(dy, dx);
@@ -1155,9 +1155,25 @@ export class ShadowApprenticeGame {
     });
   }
 
-  private damagePlayer(amount: number) {
+  private damagePlayer(amount: number, type?: 'contact' | 'projectile') {
     if (this.playerInvulnTimer > 0) return;
     
+    // Calculate total level for Shadow Aegis bubble
+    const totalLevel = this.playerStats.lightningLevel +
+                       this.playerStats.voidPushLevel +
+                       this.playerStats.leapLevel +
+                       this.playerStats.healthLevel +
+                       this.playerStats.energyRegenLevel;
+
+    // Apply shield bubble damage reductions if active
+    if (totalLevel > 5) {
+      if (type === 'contact') {
+        amount *= (1 / 3); // direct attacks do one third damage
+      } else if (type === 'projectile') {
+        amount *= 0.5; // laser/projectile attacks do half damage
+      }
+    }
+
     // Shield absorption first
     if (this.playerStats.shield && this.playerStats.shield > 0) {
       if (this.playerStats.shield >= amount) {
@@ -1279,6 +1295,38 @@ export class ShadowApprenticeGame {
   }
 
   private drawPlayer() {
+    // Draw Shadow Aegis bubble if total level is > 5 (meaning player has upgraded at least once)
+    const totalLevel = this.playerStats.lightningLevel +
+                       this.playerStats.voidPushLevel +
+                       this.playerStats.leapLevel +
+                       this.playerStats.healthLevel +
+                       this.playerStats.energyRegenLevel;
+
+    if (totalLevel > 5) {
+      this.ctx.save();
+      const levelDiff = totalLevel - 5;
+      const bubbleRadius = this.playerRadius + 9 + Math.min(12, levelDiff * 0.8);
+      const borderAlpha = Math.min(0.65, 0.15 + levelDiff * 0.05);
+      const fillAlpha = Math.min(0.18, 0.02 + levelDiff * 0.015);
+      
+      const pulse = 1 + Math.sin(Date.now() * 0.004) * 0.025;
+      const finalRadius = bubbleRadius * pulse;
+      
+      this.ctx.fillStyle = `rgba(168, 85, 247, ${fillAlpha})`; // translucent purple
+      this.ctx.beginPath();
+      this.ctx.arc(this.playerX, this.playerY, finalRadius, 0, Math.PI * 2);
+      this.ctx.fill();
+      
+      this.ctx.strokeStyle = `rgba(192, 132, 252, ${borderAlpha})`; // violet
+      this.ctx.lineWidth = 1.5 + Math.min(1.5, levelDiff * 0.15);
+      this.ctx.shadowBlur = 6 + Math.min(10, levelDiff * 0.8);
+      this.ctx.shadowColor = '#c084fc';
+      this.ctx.beginPath();
+      this.ctx.arc(this.playerX, this.playerY, finalRadius, 0, Math.PI * 2);
+      this.ctx.stroke();
+      this.ctx.restore();
+    }
+
     // Draw kinetic shield ring around player if active
     if (this.playerStats.shield && this.playerStats.shield > 0) {
       this.ctx.save();
