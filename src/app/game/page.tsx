@@ -177,15 +177,26 @@ export default function GamePage() {
             <span className="text-purple-400 flex items-center gap-1 uppercase tracking-widest text-[10px]">
               <Eye className="w-3 h-3" /> {user.username}
             </span>
-            <span className="text-slate-400 font-mono text-[10px]">HP: {Math.ceil(health)} / {gameStats?.maxHealth || 100}</span>
+            <span className="text-slate-400 font-mono text-[10px]">
+              HP: {Math.ceil(health)} / {gameStats?.maxHealth || 100}
+              {gameStats?.shield && gameStats.shield > 0 ? (
+                <span className="text-blue-400 font-bold ml-1">({gameStats.shield} SHIELD)</span>
+              ) : null}
+            </span>
           </div>
           
           {/* Health Bar */}
-          <div className="w-full bg-slate-950 h-3 rounded-full overflow-hidden border border-slate-800">
+          <div className="relative w-full bg-slate-950 h-3 rounded-full overflow-hidden border border-slate-800">
             <div
               className="bg-gradient-to-r from-red-600 to-red-500 h-full rounded-full transition-all duration-75"
               style={{ width: `${Math.max(0, Math.min(100, (health / (gameStats?.maxHealth || 100)) * 100))}%` }}
             />
+            {gameStats?.shield && gameStats.shield > 0 ? (
+              <div
+                className="absolute top-0 bottom-0 left-0 bg-blue-500/60 border-r border-blue-400 transition-all duration-75"
+                style={{ width: `${Math.max(0, Math.min(100, (gameStats.shield / 30) * 100))}%` }}
+              />
+            ) : null}
           </div>
 
           <div className="flex justify-between items-center text-xs font-semibold mt-1">

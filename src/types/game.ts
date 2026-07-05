@@ -3,7 +3,7 @@ export interface Position {
   y: number;
 }
 
-export type EnemyType = 'melee' | 'ranged' | 'boss';
+export type EnemyType = 'melee' | 'ranged' | 'boss' | 'assassin';
 
 export interface Enemy {
   id: string;
@@ -29,6 +29,13 @@ export interface Enemy {
 
   // Boss attack state
   bossSpecialTimer?: number;
+
+  // Slow effects
+  isSlowed?: boolean;
+  slowTimer?: number;
+
+  // Blink timing (assassins)
+  blinkTimer?: number;
 }
 
 export interface Projectile {
@@ -43,7 +50,7 @@ export interface Projectile {
   owner: 'player' | 'enemy';
 }
 
-export type ParticleType = 'spark' | 'lightning' | 'push' | 'dash' | 'blood' | 'dust';
+export type ParticleType = 'spark' | 'lightning' | 'push' | 'dash' | 'blood' | 'dust' | 'vortex' | 'vapor' | 'shield';
 
 export interface Particle {
   id: string;
@@ -77,6 +84,17 @@ export interface PlayerStats {
   leapLevel: number;
   healthLevel: number;
   energyRegenLevel: number;
+
+  // Specializations
+  lightningSlow?: boolean;
+  lightningChainCount?: number;
+  vortexPush?: boolean;
+  shatterCone?: boolean;
+  voidAegis?: boolean;
+  vaporTrail?: boolean;
+  
+  // Dynamic shield value
+  shield?: number;
 }
 
 export interface GameUpgrade {

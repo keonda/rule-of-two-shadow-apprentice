@@ -105,7 +105,14 @@ export class ShadowApprenticeGame {
       voidPushLevel: 1,
       leapLevel: 1,
       healthLevel: 1,
-      energyRegenLevel: 1
+      energyRegenLevel: 1,
+      lightningSlow: false,
+      lightningChainCount: 0,
+      vortexPush: false,
+      shatterCone: false,
+      voidAegis: false,
+      vaporTrail: false,
+      shield: 0
     };
 
     this.playerHealth = this.playerStats.maxHealth;
@@ -194,6 +201,7 @@ export class ShadowApprenticeGame {
 
   public destroy() {
     this.isGameActive = false;
+    audioManager.stopSoundtrack();
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
     }
@@ -202,6 +210,11 @@ export class ShadowApprenticeGame {
 
   public setPaused(paused: boolean) {
     this.isPaused = paused;
+    if (paused) {
+      audioManager.stopSoundtrack();
+    } else {
+      audioManager.startSoundtrack();
+    }
   }
 
   // Wave Management
@@ -210,6 +223,9 @@ export class ShadowApprenticeGame {
     this.projectiles = [];
     this.spawnTimer = 0;
     this.enemiesSpawned = 0;
+    
+    audioManager.setWave(this.wave);
+    audioManager.startSoundtrack();
     
     const isMasterTrial = this.wave % 3 === 0;
 
@@ -307,6 +323,25 @@ export class ShadowApprenticeGame {
     // Spawn push particle arc
     this.spawnPushParticles(this.playerX, this.playerY, pushAngle, baseRadius);
 
+    // Spawn Singularity Vortex if specialization is active
+    if (this.playerStats.vortexPush) {
+      const vortexX = this.playerX + Math.cos(pushAngle) * 90;
+      const vortexY = this.playerY + Math.sin(pushAngle) * 90;
+
+      this.particles.push({
+        id: Math.random().toString(),
+        x: vortexX,
+        y: vortexY,
+        vx: 0,
+        vy: 0,
+        radius: 70, // pull radius
+        color: 'rgba(124, 58, 237, 0.6)',
+        alpha: 1.0,
+        decay: 0.005, // lasts ~3.3s
+        type: 'vortex'
+      });
+    }
+
     // Apply pushback to enemies
     this.enemies.forEach(enemy => {
       const dx = enemy.x - this.playerX;
@@ -326,7 +361,13 @@ export class ShadowApprenticeGame {
           enemy.pushBackDuration = 20; // 20 frames of stun/push
           
           const comboMult = 1 + (this.comboCount * 0.01);
-          const damage = 5 * this.playerStats.voidPushLevel * comboMult;
+          let damage = 5 * this.playerStats.voidPushLevel * comboMult;
+          
+          // Shatter Blast bonus damage
+          if (enemy.isSlowed && this.playerStats.shatterCone) {
+            damage *= 2.5;
+            this.spawnHitParticles(enemy.x, enemy.y, '#06b6d4', 15);
+          }
           enemy.health -= damage;
           
           this.incrementCombo(1);
@@ -370,7 +411,7 @@ export class ShadowApprenticeGame {
     // Find enemies in range
     const range = 250 + this.playerStats.lightningLevel * 25;
     const lightningDmg = 12 * (1 + (this.playerStats.lightningLevel - 1) * 0.15);
-    const bounceTargets = this.playerStats.lightningLevel; // level 1: 1 target, level 2: 2 targets, etc.
+    const bounceTargets = this.playerStats.lightningLevel + (this.playerStats.lightningChainCount || 0); // level 1: 1 target, level 2: 2 targets, etc. Plus chain count specialization
 
     // Sort enemies by distance
     const sortedEnemies = this.enemies
@@ -411,6 +452,12 @@ export class ShadowApprenticeGame {
       
       this.incrementCombo(1);
 
+      // Apply Discharge Freeze slow
+      if (this.playerStats.lightningSlow) {
+        enemy.isSlowed = true;
+        enemy.slowTimer = 90; // 1.5s slow
+      }
+
       // Spawn lightning particle
       this.spawnLightningArc(prevSource, enemy);
 
@@ -447,8 +494,17 @@ export class ShadowApprenticeGame {
       damage = 25 + this.wave * 3;
       scoreValue = 1000 * this.wave;
     } else {
-      // 30% chance for ranged drones starting wave 2
-      if (this.wave > 1 && Math.random() < 0.3) {
+      const randVal = Math.random();
+      if (this.wave >= 4 && randVal < 0.22) {
+        // Stealth Assassin
+        type = 'assassin';
+        radius = 13;
+        color = '#ec4899'; // magenta outline
+        health = 25 + this.wave * 4;
+        speed = 2.4 + (this.wave * 0.08); // fast!
+        damage = 18 + this.wave * 2;
+        scoreValue = 300 * this.wave;
+      } else if (this.wave > 1 && randVal < 0.45) {
         type = 'ranged';
         radius = 14;
         color = '#f97316'; // orange ranged
@@ -665,6 +721,22 @@ export class ShadowApprenticeGame {
         this.spawnDashGhost(this.playerX, this.playerY);
       }
 
+      // Brimstone Dash trail
+      if (this.playerStats.vaporTrail) {
+        this.particles.push({
+          id: Math.random().toString(),
+          x: this.playerX,
+          y: this.playerY,
+          vx: (Math.random() - 0.5) * 0.4,
+          vy: (Math.random() - 0.5) * 0.4,
+          radius: 30, // damage radius
+          color: 'rgba(239, 68, 68, 0.4)',
+          alpha: 1.0,
+          decay: 0.02, // lasts 50 frames
+          type: 'vapor'
+        });
+      }
+
       // Check collision and damage enemies during leap
       const hitRadius = this.playerRadius + 15; // slightly wider hit zone
       const comboMult = 1 + (this.comboCount * 0.01);
@@ -697,6 +769,12 @@ export class ShadowApprenticeGame {
       this.leapFrameCount++;
       if (this.leapFrameCount >= this.leapMaxFrames) {
         this.isLeaping = false;
+        
+        // Void Shroud shield trigger on landing
+        if (this.playerStats.voidAegis) {
+          this.playerStats.shield = 30; // 30 health point shield
+          audioManager.playUpgrade();
+        }
       }
     } else {
       // Normal WASD movement
@@ -731,6 +809,14 @@ export class ShadowApprenticeGame {
 
   private updateEnemies() {
     this.enemies.forEach(enemy => {
+      // Process slow timers
+      if (enemy.isSlowed && enemy.slowTimer !== undefined) {
+        enemy.slowTimer--;
+        if (enemy.slowTimer <= 0) {
+          enemy.isSlowed = false;
+        }
+      }
+
       // Apply pushback physics
       if (enemy.pushBackDuration > 0) {
         enemy.x += enemy.pushBackX;
@@ -752,20 +838,22 @@ export class ShadowApprenticeGame {
       const dy = this.playerY - enemy.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
+      const currentSpeed = enemy.isSlowed ? enemy.speed * 0.5 : enemy.speed;
+
       if (enemy.type === 'melee') {
         if (dist > 0) {
-          enemy.x += (dx / dist) * enemy.speed;
-          enemy.y += (dy / dist) * enemy.speed;
+          enemy.x += (dx / dist) * currentSpeed;
+          enemy.y += (dy / dist) * currentSpeed;
         }
       } else if (enemy.type === 'ranged') {
         // Keep distance (approx 200px)
         const targetDist = 220;
         if (dist > targetDist + 20) {
-          enemy.x += (dx / dist) * enemy.speed;
-          enemy.y += (dy / dist) * enemy.speed;
+          enemy.x += (dx / dist) * currentSpeed;
+          enemy.y += (dy / dist) * currentSpeed;
         } else if (dist < targetDist - 20) {
-          enemy.x -= (dx / dist) * enemy.speed;
-          enemy.y -= (dy / dist) * enemy.speed;
+          enemy.x -= (dx / dist) * currentSpeed;
+          enemy.y -= (dy / dist) * currentSpeed;
         }
 
         // Shoot projectile
@@ -774,17 +862,43 @@ export class ShadowApprenticeGame {
           enemy.shootTimer = 0;
           this.shootEnemyProjectile(enemy, dx, dy);
         }
+      } else if (enemy.type === 'assassin') {
+        // Assassin chases player
+        if (dist > 0) {
+          enemy.x += (dx / dist) * currentSpeed;
+          enemy.y += (dy / dist) * currentSpeed;
+        }
+
+        // Teleport behind player
+        enemy.blinkTimer = (enemy.blinkTimer || 0) + 1;
+        if (enemy.blinkTimer >= 240) { // every 4 seconds
+          if (dist < 320) {
+            enemy.blinkTimer = 0;
+            this.spawnHitParticles(enemy.x, enemy.y, '#ec4899', 10);
+            
+            // Teleport behind player aiming/facing angle
+            const playerFacingAngle = Math.atan2(this.mouseY - this.playerY, this.mouseX - this.playerX);
+            const targetX = this.playerX - Math.cos(playerFacingAngle) * 80;
+            const targetY = this.playerY - Math.sin(playerFacingAngle) * 80;
+            
+            enemy.x = Math.max(enemy.radius, Math.min(this.arenaWidth - enemy.radius, targetX));
+            enemy.y = Math.max(enemy.radius, Math.min(this.arenaHeight - enemy.radius, targetY));
+            
+            this.spawnHitParticles(enemy.x, enemy.y, '#ec4899', 10);
+            audioManager.playLeap(); // teleport swoosh
+          }
+        }
       } else if (enemy.type === 'boss') {
         // Boss AI
         enemy.bossSpecialTimer = (enemy.bossSpecialTimer || 0) + 1;
         
         // Boss moves towards player
         if (dist > 0) {
-          enemy.x += (dx / dist) * enemy.speed;
-          enemy.y += (dy / dist) * enemy.speed;
+          enemy.x += (dx / dist) * currentSpeed;
+          enemy.y += (dy / dist) * currentSpeed;
         }
 
-        // Boss attacks every 3 seconds (180 frames)
+        // Boss attacks every 2.5 seconds (150 frames)
         if (enemy.bossSpecialTimer >= 150) {
           enemy.bossSpecialTimer = 0;
           this.triggerBossAttack(enemy, dx, dy);
@@ -872,6 +986,52 @@ export class ShadowApprenticeGame {
         if (angleRadiusInfo) {
           p.radius += 12; // Grow radius
         }
+      } else if (p.type === 'vortex') {
+        // Vortex pull and damage enemies
+        this.enemies.forEach(enemy => {
+          const dx = p.x - enemy.x;
+          const dy = p.y - enemy.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          
+          if (dist < p.radius + 30) {
+            const pullForce = Math.max(0.5, (p.radius - dist) * 0.04);
+            const pullAngle = Math.atan2(dy, dx);
+            
+            enemy.x += Math.cos(pullAngle) * pullForce;
+            enemy.y += Math.sin(pullAngle) * pullForce;
+            
+            enemy.health -= 0.15; // minor tick damage
+            
+            if (Math.random() < 0.1) {
+              this.particles.push({
+                id: Math.random().toString(),
+                x: enemy.x,
+                y: enemy.y,
+                vx: Math.cos(pullAngle) * 2.5,
+                vy: Math.sin(pullAngle) * 2.5,
+                radius: 1,
+                color: '#8b5cf6',
+                alpha: 0.8,
+                decay: 0.04,
+                type: 'spark'
+              });
+            }
+          }
+        });
+      } else if (p.type === 'vapor') {
+        // Damaging shadow trail
+        this.enemies.forEach(enemy => {
+          const dx = p.x - enemy.x;
+          const dy = p.y - enemy.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          
+          if (dist < p.radius + enemy.radius) {
+            enemy.health -= 0.35; // tick damage
+            if (Math.random() < 0.05) {
+              this.spawnHitParticles(enemy.x, enemy.y, '#ef4444', 2);
+            }
+          }
+        });
       }
     });
 
@@ -998,6 +1158,19 @@ export class ShadowApprenticeGame {
   private damagePlayer(amount: number) {
     if (this.playerInvulnTimer > 0) return;
     
+    // Shield absorption first
+    if (this.playerStats.shield && this.playerStats.shield > 0) {
+      if (this.playerStats.shield >= amount) {
+        this.playerStats.shield -= amount;
+        this.spawnHitParticles(this.playerX, this.playerY, '#60a5fa', 6);
+        return;
+      } else {
+        amount -= this.playerStats.shield;
+        this.playerStats.shield = 0;
+        this.spawnHitParticles(this.playerX, this.playerY, '#60a5fa', 6);
+      }
+    }
+
     this.playerHealth -= amount;
     this.screenShakeIntensity = Math.min(10, this.screenShakeIntensity + amount * 0.4);
     
@@ -1106,6 +1279,19 @@ export class ShadowApprenticeGame {
   }
 
   private drawPlayer() {
+    // Draw kinetic shield ring around player if active
+    if (this.playerStats.shield && this.playerStats.shield > 0) {
+      this.ctx.save();
+      this.ctx.strokeStyle = 'rgba(96, 165, 250, 0.75)'; // glowing blue ring
+      this.ctx.lineWidth = 3;
+      this.ctx.shadowBlur = 12;
+      this.ctx.shadowColor = '#60a5fa';
+      this.ctx.beginPath();
+      this.ctx.arc(this.playerX, this.playerY, this.playerRadius + 5, 0, Math.PI * 2);
+      this.ctx.stroke();
+      this.ctx.restore();
+    }
+
     this.ctx.save();
     this.ctx.translate(this.playerX, this.playerY);
 
@@ -1171,6 +1357,20 @@ export class ShadowApprenticeGame {
       this.ctx.save();
       this.ctx.translate(enemy.x, enemy.y);
 
+      // Check if slowed
+      if (enemy.isSlowed) {
+        this.ctx.strokeStyle = '#06b6d4'; // cyan border
+        this.ctx.lineWidth = 3;
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, enemy.radius + 3, 0, Math.PI * 2);
+        this.ctx.stroke();
+      }
+
+      // Check if assassin (semi-invisible)
+      if (enemy.type === 'assassin') {
+        this.ctx.globalAlpha = 0.35; // semi-invisible shadow
+      }
+
       // Enemy base shadow/cloak
       this.ctx.fillStyle = enemy.color;
       this.ctx.beginPath();
@@ -1178,8 +1378,8 @@ export class ShadowApprenticeGame {
       this.ctx.fill();
 
       // Cloak border
-      this.ctx.strokeStyle = '#000000';
-      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeStyle = enemy.type === 'assassin' ? '#ec4899' : '#000000';
+      this.ctx.lineWidth = enemy.type === 'assassin' ? 2 : 1.5;
       this.ctx.stroke();
 
       // Shadow face area
@@ -1193,9 +1393,9 @@ export class ShadowApprenticeGame {
       this.ctx.rotate(angle);
 
       // Glowing Eyes
-      this.ctx.fillStyle = '#ef4444'; // Glowing red eyes for hostiles
+      this.ctx.fillStyle = enemy.type === 'assassin' ? '#f472b6' : '#ef4444'; // Glowing magenta/red eyes
       this.ctx.shadowBlur = 6;
-      this.ctx.shadowColor = '#ef4444';
+      this.ctx.shadowColor = this.ctx.fillStyle as string;
 
       if (enemy.type === 'boss') {
         // Boss gets multiple terrifying eyes
@@ -1209,8 +1409,8 @@ export class ShadowApprenticeGame {
       } else {
         // Standard double eyes
         this.ctx.beginPath();
-        this.ctx.arc(enemy.radius * 0.35, -enemy.radius * 0.25, 2, 0, Math.PI * 2);
-        this.ctx.arc(enemy.radius * 0.35, enemy.radius * 0.25, 2, 0, Math.PI * 2);
+        this.ctx.arc(enemy.radius * 0.35, -enemy.radius * 0.2, 2.5, 0, Math.PI * 2);
+        this.ctx.arc(enemy.radius * 0.35, enemy.radius * 0.2, 2.5, 0, Math.PI * 2);
         this.ctx.fill();
       }
 
@@ -1275,6 +1475,38 @@ export class ShadowApprenticeGame {
         this.ctx.beginPath();
         this.ctx.arc(p.x, p.y, p.radius, angle - coneHalf, angle + coneHalf);
         this.ctx.stroke();
+      } else if (p.type === 'vortex') {
+        // Pulsing dark hole vortex rendering
+        const pulse = 1 + Math.sin(Date.now() * 0.01) * 0.1;
+        const currentRad = p.radius * pulse;
+        
+        const grad = this.ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, currentRad);
+        grad.addColorStop(0, 'rgba(0, 0, 0, 1.0)');
+        grad.addColorStop(0.3, `rgba(88, 28, 135, ${p.alpha})`);
+        grad.addColorStop(0.7, `rgba(124, 58, 237, ${p.alpha * 0.5})`);
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        
+        this.ctx.fillStyle = grad;
+        this.ctx.beginPath();
+        this.ctx.arc(p.x, p.y, currentRad, 0, Math.PI * 2);
+        this.ctx.fill();
+        
+        // Draw spiral arm effect
+        this.ctx.strokeStyle = `rgba(139, 92, 246, ${p.alpha * 0.4})`;
+        this.ctx.lineWidth = 2;
+        this.ctx.beginPath();
+        this.ctx.arc(p.x, p.y, currentRad * 0.5, (Date.now() * 0.002) % (Math.PI * 2), ((Date.now() * 0.002) % (Math.PI * 2)) + Math.PI);
+        this.ctx.stroke();
+      } else if (p.type === 'vapor') {
+        const grad = this.ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.radius);
+        grad.addColorStop(0, `rgba(239, 68, 68, ${p.alpha * 0.4})`);
+        grad.addColorStop(0.5, `rgba(168, 85, 247, ${p.alpha * 0.2})`);
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        
+        this.ctx.fillStyle = grad;
+        this.ctx.beginPath();
+        this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        this.ctx.fill();
       } else {
         // Standard circle particle
         this.ctx.fillStyle = p.color;
@@ -1291,6 +1523,7 @@ export class ShadowApprenticeGame {
   public start() {
     this.isPaused = false;
     this.isGameActive = true;
+    audioManager.startSoundtrack();
     
     const loop = () => {
       if (!this.isGameActive) return;
@@ -1304,14 +1537,54 @@ export class ShadowApprenticeGame {
 
   // Upgrades
   public getUpgradeOptions(): { id: string; name: string; description: string }[] {
-    const list = [
-      { id: 'lightning', name: 'Stronger Lightning', description: 'Deals +15% more damage and chains to 1 additional target.' },
-      { id: 'voidPush', name: 'Wider Void Push', description: 'Increases shockwave push area, deflection force, and damage.' },
-      { id: 'leap', name: 'Shorter Leap Cooldown', description: 'Decreases Leap recovery time by 20%.' },
-      { id: 'health', name: 'Shadow Fortress', description: 'Increases maximum Vitality by +25 and heals you.' },
-      { id: 'energyRegen', name: 'Void Harmony', description: 'Increases energy regeneration rate by +30%.' }
-    ];
-    
+    const list: { id: string; name: string; description: string }[] = [];
+
+    // 1. Basic Stats (always available, but basic level increases)
+    list.push({ id: 'health', name: 'Shadow Fortress', description: `Increases maximum Vitality by +25 (Level ${this.playerStats.healthLevel + 1}) and heals you.` });
+    list.push({ id: 'energyRegen', name: 'Void Harmony', description: `Increases energy regeneration rate by +30% (Level ${this.playerStats.energyRegenLevel + 1}).` });
+
+    // 2. Shadows Lightning
+    if (this.playerStats.lightningLevel < 3) {
+      list.push({ id: 'lightning', name: 'Stronger Lightning', description: `Increases Shadow Lightning level to ${this.playerStats.lightningLevel + 1}.` });
+    }
+    // Branching options (Lightning Level 2+)
+    if (this.playerStats.lightningLevel >= 2) {
+      if (!this.playerStats.lightningSlow) {
+        list.push({ id: 'lightning_slow', name: 'Discharge Freeze', description: 'Shadow Lightning slows targets hit by 40% for 1.5s.' });
+      }
+      if (!this.playerStats.lightningChainCount) {
+        list.push({ id: 'lightning_chain', name: 'Chain Resonance', description: 'Shadow Lightning chains to +2 additional targets.' });
+      }
+    }
+
+    // 3. Void Push
+    if (this.playerStats.voidPushLevel < 3) {
+      list.push({ id: 'voidPush', name: 'Wider Void Push', description: `Increases Void Push level to ${this.playerStats.voidPushLevel + 1}.` });
+    }
+    // Branching options (Push Level 2+)
+    if (this.playerStats.voidPushLevel >= 2) {
+      if (!this.playerStats.vortexPush) {
+        list.push({ id: 'push_vortex', name: 'Singularity Pulse', description: 'Void Push leaves a dark vortex that pulls in and ticks nearby enemies.' });
+      }
+      if (!this.playerStats.shatterCone) {
+        list.push({ id: 'push_shatter', name: 'Shatter Blast', description: 'Void Push deals 2.5x damage to enemies slowed by lightning.' });
+      }
+    }
+
+    // 4. Leap
+    if (this.playerStats.leapLevel < 3) {
+      list.push({ id: 'leap', name: 'Shorter Leap Cooldown', description: `Increases Leap level to ${this.playerStats.leapLevel + 1} and reduces cooldown.` });
+    }
+    // Branching options (Leap Level 2+)
+    if (this.playerStats.leapLevel >= 2) {
+      if (!this.playerStats.voidAegis) {
+        list.push({ id: 'leap_shield', name: 'Void Shroud', description: 'Leaping grants you a temporary kinetic shield (absorbs 25 damage) upon landing.' });
+      }
+      if (!this.playerStats.vaporTrail) {
+        list.push({ id: 'leap_trail', name: 'Brimstone Dash', description: 'Leap leaves a trail of damaging shadow vapor on the ground.' });
+      }
+    }
+
     // Return 3 random upgrades
     const shuffled = [...list].sort(() => 0.5 - Math.random());
     return shuffled.slice(0, 3);
@@ -1322,22 +1595,40 @@ export class ShadowApprenticeGame {
 
     if (upgradeId === 'lightning') {
       this.playerStats.lightningLevel++;
-      this.currentUpgradesSelected.push('Stronger Lightning');
+      this.currentUpgradesSelected.push(`Stronger Lightning Lvl ${this.playerStats.lightningLevel}`);
+    } else if (upgradeId === 'lightning_slow') {
+      this.playerStats.lightningSlow = true;
+      this.currentUpgradesSelected.push('Specialization: Discharge Freeze');
+    } else if (upgradeId === 'lightning_chain') {
+      this.playerStats.lightningChainCount = 2; // extra chains
+      this.currentUpgradesSelected.push('Specialization: Chain Resonance');
     } else if (upgradeId === 'voidPush') {
       this.playerStats.voidPushLevel++;
-      this.currentUpgradesSelected.push('Wider Void Push');
+      this.currentUpgradesSelected.push(`Wider Void Push Lvl ${this.playerStats.voidPushLevel}`);
+    } else if (upgradeId === 'push_vortex') {
+      this.playerStats.vortexPush = true;
+      this.currentUpgradesSelected.push('Specialization: Singularity Pulse');
+    } else if (upgradeId === 'push_shatter') {
+      this.playerStats.shatterCone = true;
+      this.currentUpgradesSelected.push('Specialization: Shatter Blast');
     } else if (upgradeId === 'leap') {
       this.playerStats.leapLevel++;
       this.playerStats.leapCooldown = Math.max(30, Math.floor(this.playerStats.leapCooldown * 0.8));
-      this.currentUpgradesSelected.push('Shorter Leap Cooldown');
+      this.currentUpgradesSelected.push(`Shorter Leap Cooldown Lvl ${this.playerStats.leapLevel}`);
+    } else if (upgradeId === 'leap_shield') {
+      this.playerStats.voidAegis = true;
+      this.currentUpgradesSelected.push('Specialization: Void Shroud');
+    } else if (upgradeId === 'leap_trail') {
+      this.playerStats.vaporTrail = true;
+      this.currentUpgradesSelected.push('Specialization: Brimstone Dash');
     } else if (upgradeId === 'health') {
       this.playerStats.healthLevel++;
       this.playerStats.maxHealth += 25;
       this.playerHealth = this.playerStats.maxHealth; // Full heal
-      this.currentUpgradesSelected.push('Shadow Fortress');
+      this.currentUpgradesSelected.push(`Shadow Fortress Lvl ${this.playerStats.healthLevel}`);
     } else if (upgradeId === 'energyRegen') {
       this.playerStats.energyRegenLevel++;
-      this.currentUpgradesSelected.push('Void Harmony');
+      this.currentUpgradesSelected.push(`Void Harmony Lvl ${this.playerStats.energyRegenLevel}`);
     }
 
     this.triggerStatsCallback();
