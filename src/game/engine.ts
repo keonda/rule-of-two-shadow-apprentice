@@ -37,6 +37,7 @@ export class ShadowApprenticeGame {
   private leapDirY: number = 0;
   private leapInvulnFrames: number = 15;
   private playerInvulnTimer: number = 0;
+  private leapHitEnemies: Set<string> = new Set();
 
   // Input State
   private keys: { [key: string]: boolean } = {};
@@ -268,6 +269,7 @@ export class ShadowApprenticeGame {
     this.leapDirY = dy;
     this.playerInvulnTimer = this.leapInvulnFrames;
     this.leapTimer = this.playerStats.leapCooldown;
+    this.leapHitEnemies.clear();
     
     audioManager.playLeap();
     this.triggerStatsCallback();
@@ -637,6 +639,33 @@ export class ShadowApprenticeGame {
       if (this.leapFrameCount % 2 === 0) {
         this.spawnDashGhost(this.playerX, this.playerY);
       }
+
+      // Check collision and damage enemies during leap
+      const hitRadius = this.playerRadius + 15; // slightly wider hit zone
+      const leapDmg = 25 * this.playerStats.leapLevel;
+      
+      this.enemies.forEach(enemy => {
+        if (this.leapHitEnemies.has(enemy.id)) return;
+        
+        const dx = enemy.x - this.playerX;
+        const dy = enemy.y - this.playerY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist < hitRadius + enemy.radius) {
+          enemy.health -= leapDmg;
+          this.leapHitEnemies.add(enemy.id);
+          
+          // Pushback enemy slightly away from the leap path
+          const pushAngle = Math.atan2(dy, dx);
+          enemy.pushBackX = Math.cos(pushAngle) * 7;
+          enemy.pushBackY = Math.sin(pushAngle) * 7;
+          enemy.pushBackDuration = 12;
+          
+          // Spawn nice glowing purple particles
+          this.spawnHitParticles(enemy.x, enemy.y, '#d8b4fe', 8);
+          audioManager.playEnemyHurt();
+        }
+      });
 
       this.leapFrameCount++;
       if (this.leapFrameCount >= this.leapMaxFrames) {
