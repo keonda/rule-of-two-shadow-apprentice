@@ -4,8 +4,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import GameCanvas from '@/components/GameCanvas';
-import { PlayerStats } from '@/types/game';
-import { Shield, Sparkles, Award, Play, Pause, RotateCcw, Home, Trophy, Volume2, VolumeX, Eye } from 'lucide-react';
+import { PlayerStats, MasterState } from '@/types/game';
+import { Shield, Sparkles, Award, Play, Pause, RotateCcw, Home, Trophy, Volume2, VolumeX, Eye, Flame, ShieldAlert } from 'lucide-react';
 
 export default function GamePage() {
   const router = useRouter();
@@ -16,6 +16,7 @@ export default function GamePage() {
 
   // HUD stats
   const [gameStats, setGameStats] = useState<PlayerStats | null>(null);
+  const [masterState, setMasterState] = useState<MasterState | null>(null);
   const [health, setHealth] = useState(100);
   const [energy, setEnergy] = useState(100);
   const [score, setScore] = useState(0);
@@ -78,7 +79,8 @@ export default function GamePage() {
     currentEnergy: number,
     currentScore: number,
     currentWave: number,
-    currentComboCount: number
+    currentComboCount: number,
+    currentMasterState?: MasterState
   ) => {
     setGameStats(stats);
     setHealth(currentHealth);
@@ -86,6 +88,7 @@ export default function GamePage() {
     setScore(currentScore);
     setWave(currentWave);
     setComboCount(currentComboCount);
+    if (currentMasterState) setMasterState(currentMasterState);
   };
 
   // Wave complete -> Show upgrades
@@ -210,6 +213,39 @@ export default function GamePage() {
               className="bg-gradient-to-r from-purple-600 to-indigo-500 h-full rounded-full transition-all duration-75"
               style={{ width: `${Math.max(0, Math.min(100, energy))}%` }}
             />
+          </div>
+
+          {/* Master Companion (Rule of Two AI) Status Badge */}
+          <div className="mt-1.5 bg-slate-950/80 backdrop-blur-md p-2 rounded-lg border border-red-900/30 flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <span className="text-red-400 font-bold uppercase tracking-wider text-[10px] flex items-center gap-1">
+                <Flame className="w-3 h-3 text-red-500 animate-pulse" /> Rule of Two: Master Link
+              </span>
+              {masterState?.isOverloading ? (
+                <span className="text-red-400 font-extrabold text-[9px] uppercase tracking-widest bg-red-950/80 px-1.5 py-0.5 rounded border border-red-500/50 animate-pulse">
+                  OVERLOAD ACTIVE
+                </span>
+              ) : masterState?.activeTethersCount && masterState.activeTethersCount > 0 ? (
+                <span className="text-amber-400 font-bold text-[9px] bg-amber-950/50 px-1.5 py-0.5 rounded border border-amber-500/30">
+                  {masterState.activeTethersCount} LINKED
+                </span>
+              ) : (
+                <span className="text-slate-400 text-[9px] font-mono">SYNCED</span>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between text-[10px] text-slate-400 mt-0.5">
+              <span>Emergency Shockwave</span>
+              {masterState?.interventionCooldown && masterState.interventionCooldown > 0 ? (
+                <span className="text-slate-500 font-mono text-[9px]">
+                  CD: {Math.ceil(masterState.interventionCooldown / 60)}s
+                </span>
+              ) : (
+                <span className="text-emerald-400 font-semibold text-[9px] flex items-center gap-0.5">
+                  <ShieldAlert className="w-2.5 h-2.5" /> READY
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

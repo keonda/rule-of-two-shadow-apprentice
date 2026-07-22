@@ -1,4 +1,4 @@
-import { Enemy, EnemyType, Particle, PlayerStats, Projectile, Position, Canister, Hazard, Wall } from '../types/game';
+import { Enemy, EnemyType, Particle, PlayerStats, Projectile, Position, Canister, Hazard, Wall, TetherLink, MasterState } from '../types/game';
 import { audioManager } from './audio';
 
 export class ShadowApprenticeGame {
@@ -6,7 +6,7 @@ export class ShadowApprenticeGame {
   private ctx: CanvasRenderingContext2D;
   
   // Callbacks
-  private onStatsChange: (stats: PlayerStats, currentHealth: number, currentEnergy: number, score: number, wave: number, comboCount: number) => void;
+  private onStatsChange: (stats: PlayerStats, currentHealth: number, currentEnergy: number, score: number, wave: number, comboCount: number, masterState?: MasterState) => void;
   private onGameOver: (score: number, wave: number, upgrades: string[]) => void;
   private onUpgradeChoice: () => void;
   private onMasterTrialDefeated: () => void;
@@ -25,6 +25,17 @@ export class ShadowApprenticeGame {
   private canisters: Canister[] = [];
   private hazards: Hazard[] = [];
   private walls: Wall[] = [];
+
+  // Master Companion (Rule of Two AI)
+  public masterX: number = 280;
+  public masterY: number = 220;
+  public masterRadius: number = 22;
+  private tetherLinks: TetherLink[] = [];
+  private masterTetherTimer: number = 0;
+  private masterOverloadTimer: number = 0;
+  private masterInterventionCooldown: number = 0;
+  private maxInterventionCooldown: number = 2700; // 45 seconds at 60 FPS
+  private isSharingDamage: boolean = false;
   
   // Cooldown Trackers (in frames or ms; we will use time-based or frame-based, frame-based is easy for 60fps)
   // Let's use timestamp based or simple frame counters. Let's use simple frame counters at 60 FPS.
@@ -79,7 +90,7 @@ export class ShadowApprenticeGame {
 
   constructor(
     canvas: HTMLCanvasElement,
-    onStatsChange: (stats: PlayerStats, currentHealth: number, currentEnergy: number, score: number, wave: number, comboCount: number) => void,
+    onStatsChange: (stats: PlayerStats, currentHealth: number, currentEnergy: number, score: number, wave: number, comboCount: number, masterState?: MasterState) => void,
     onUpgradeChoice: () => void,
     onMasterTrialDefeated: () => void,
     onGameOver: (score: number, wave: number, upgrades: string[]) => void
@@ -277,7 +288,16 @@ export class ShadowApprenticeGame {
       this.playerEnergy,
       this.score,
       this.wave,
-      this.comboCount
+      this.comboCount,
+      {
+        x: this.masterX,
+        y: this.masterY,
+        isOverloading: this.masterOverloadTimer > 0,
+        overloadTimer: this.masterOverloadTimer,
+        interventionCooldown: this.masterInterventionCooldown,
+        maxInterventionCooldown: this.maxInterventionCooldown,
+        activeTethersCount: this.tetherLinks.length
+      }
     );
   }
 
@@ -411,6 +431,7 @@ export class ShadowApprenticeGame {
             this.spawnHitParticles(enemy.x, enemy.y, '#06b6d4', 15);
           }
           enemy.health -= damage;
+          this.applySharedTetherDamage(enemy.id, damage);
           
           this.incrementCombo(1);
           this.spawnHitParticles(enemy.x, enemy.y, 'purple', 8);
@@ -491,6 +512,7 @@ export class ShadowApprenticeGame {
       // Apply damage with combo multiplier
       const comboMult = 1 + (this.comboCount * 0.01);
       enemy.health -= lightningDmg * comboMult;
+      this.applySharedTetherDamage(enemy.id, lightningDmg * comboMult);
       
       this.incrementCombo(1);
 
@@ -744,6 +766,7 @@ export class ShadowApprenticeGame {
     }
 
     this.updatePlayerMovement();
+    this.updateMaster();
     this.updateEnemies();
     this.updateProjectiles();
     this.updateCanisters();
@@ -805,6 +828,7 @@ export class ShadowApprenticeGame {
         
         if (dist < hitRadius + enemy.radius) {
           enemy.health -= leapDmg;
+          this.applySharedTetherDamage(enemy.id, leapDmg);
           this.leapHitEnemies.add(enemy.id);
           this.incrementCombo(2); // Leap hits add 2 to combo
           
@@ -1175,6 +1199,7 @@ export class ShadowApprenticeGame {
 
           if (dist < proj.radius + enemy.radius) {
             enemy.health -= proj.damage;
+            this.applySharedTetherDamage(enemy.id, proj.damage);
             this.spawnHitParticles(enemy.x, enemy.y, '#c084fc', 8);
             audioManager.playEnemyHurt();
             return false; // remove projectile
@@ -1263,6 +1288,11 @@ export class ShadowApprenticeGame {
     
     audioManager.playHurt();
 
+    // Check Master Emergency Intervention if player takes lethal/critical damage
+    if (this.playerHealth <= 25 && this.playerHealth > 0 && this.masterInterventionCooldown <= 0) {
+      this.triggerMasterIntervention();
+    }
+
     if (this.playerHealth <= 0) {
       this.playerHealth = 0;
       this.handleGameOver();
@@ -1319,6 +1349,7 @@ export class ShadowApprenticeGame {
     this.drawParticles();
     this.drawProjectiles();
     this.drawEnemies();
+    this.drawMaster();
     this.drawPlayer();
 
     this.ctx.restore();
@@ -2137,5 +2168,263 @@ export class ShadowApprenticeGame {
 
       this.ctx.restore();
     });
+  }
+
+  // ==========================================
+  // MASTER COMPANION (Rule of Two AI)
+  // ==========================================
+
+  private updateMaster() {
+    // 1. Hover AI Movement (Flanking hover near player)
+    const hoverOffsetAngle = Date.now() * 0.0015;
+    const targetX = this.playerX + Math.cos(hoverOffsetAngle) * 130;
+    const targetY = this.playerY + Math.sin(hoverOffsetAngle) * 110 - 30;
+
+    // Smooth lerp movement
+    this.masterX += (targetX - this.masterX) * 0.05;
+    this.masterY += (targetY - this.masterY) * 0.05;
+
+    // 2. Decrement Intervention Cooldown
+    if (this.masterInterventionCooldown > 0) {
+      this.masterInterventionCooldown--;
+    }
+
+    // Overload Timer & Energy/Cooldown Acceleration
+    if (this.masterOverloadTimer > 0) {
+      this.masterOverloadTimer--;
+      // Overload energy boost
+      this.playerEnergy = Math.min(this.playerStats.maxEnergy, this.playerEnergy + 0.8);
+      // Cooldown acceleration
+      if (this.lightningTimer > 0) this.lightningTimer--;
+      if (this.voidPushTimer > 0) this.voidPushTimer--;
+      if (this.leapTimer > 0) this.leapTimer--;
+
+      // Overload beam sparks
+      if (Math.random() < 0.35) {
+        this.particles.push({
+          id: Math.random().toString(),
+          x: this.playerX + (Math.random() - 0.5) * 20,
+          y: this.playerY + (Math.random() - 0.5) * 20,
+          vx: (Math.random() - 0.5) * 2,
+          vy: -Math.random() * 2,
+          radius: 2,
+          color: '#ef4444',
+          alpha: 0.9,
+          decay: 0.04,
+          type: 'spark'
+        });
+      }
+    }
+
+    // Check Overload Trigger (Dark Rage Combo >= 15 or Boss trial)
+    const isBossWave = this.wave % 3 === 0;
+    if ((this.comboCount >= 15 || isBossWave) && this.masterOverloadTimer <= 0 && Math.random() < 0.02) {
+      this.masterOverloadTimer = 180; // 3 seconds overload
+      audioManager.playMasterOverload();
+    }
+
+    // 3. Shadow Tether (Suppression Link)
+    if (this.masterTetherTimer > 0) {
+      this.masterTetherTimer--;
+    } else {
+      this.castShadowTether();
+    }
+
+    // Update existing tethers
+    this.tetherLinks = this.tetherLinks.filter(link => {
+      link.duration--;
+      const sourceEnemy = this.enemies.find(e => e.id === link.sourceEnemyId);
+      const targetEnemy = this.enemies.find(e => e.id === link.targetEnemyId);
+      if (!sourceEnemy || !targetEnemy || sourceEnemy.health <= 0 || targetEnemy.health <= 0) {
+        return false;
+      }
+      // Apply slow to tethered enemies
+      sourceEnemy.isSlowed = true;
+      targetEnemy.isSlowed = true;
+      return link.duration > 0;
+    });
+  }
+
+  private castShadowTether() {
+    if (this.enemies.length < 2) return;
+
+    // Find enemies in range of Master
+    const range = 420;
+    const nearbyEnemies = this.enemies
+      .map(e => {
+        const dx = e.x - this.masterX;
+        const dy = e.y - this.masterY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        return { enemy: e, dist };
+      })
+      .filter(item => item.dist < range && item.enemy.health > 0)
+      .sort((a, b) => a.dist - b.dist);
+
+    if (nearbyEnemies.length >= 2) {
+      this.masterTetherTimer = 240; // 4 seconds cooldown
+      const source = nearbyEnemies[0].enemy;
+      const targetCount = Math.min(3, nearbyEnemies.length);
+
+      for (let i = 1; i < targetCount; i++) {
+        const target = nearbyEnemies[i].enemy;
+        this.tetherLinks.push({
+          id: Math.random().toString(),
+          sourceEnemyId: source.id,
+          targetEnemyId: target.id,
+          duration: 300 // 5 seconds duration
+        });
+      }
+
+      audioManager.playMasterTether();
+    }
+  }
+
+  public applySharedTetherDamage(enemyId: string, damage: number) {
+    if (this.isSharingDamage || damage <= 0) return;
+    this.isSharingDamage = true;
+
+    const sharedAmount = damage * 0.5;
+
+    this.tetherLinks.forEach(link => {
+      let targetId: string | null = null;
+      if (link.sourceEnemyId === enemyId) targetId = link.targetEnemyId;
+      else if (link.targetEnemyId === enemyId) targetId = link.sourceEnemyId;
+
+      if (targetId) {
+        const target = this.enemies.find(e => e.id === targetId);
+        if (target && target.health > 0) {
+          target.health -= sharedAmount;
+          this.spawnHitParticles(target.x, target.y, '#ef4444', 3);
+        }
+      }
+    });
+
+    this.isSharingDamage = false;
+  }
+
+  private triggerMasterIntervention() {
+    this.masterInterventionCooldown = this.maxInterventionCooldown;
+    
+    // Teleport Master directly to Player
+    this.masterX = this.playerX;
+    this.masterY = this.playerY;
+
+    // Restore health (+25 HP)
+    const healAmount = 25;
+    this.playerHealth = Math.min(this.playerStats.maxHealth, this.playerHealth + healAmount);
+
+    // Repel all enemies & clear projectiles
+    const pushForce = 18;
+    this.enemies.forEach(enemy => {
+      const dx = enemy.x - this.playerX;
+      const dy = enemy.y - this.playerY;
+      const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+      
+      enemy.pushBackX = (dx / dist) * pushForce;
+      enemy.pushBackY = (dy / dist) * pushForce;
+      enemy.pushBackDuration = 25;
+      enemy.health -= 35; // Intervention shockwave damage
+    });
+
+    // Destroy all hostile projectiles
+    this.projectiles = this.projectiles.filter(p => p.owner !== 'enemy');
+
+    audioManager.playMasterIntervention();
+    this.screenShakeIntensity = 15;
+
+    // Visual burst
+    this.spawnHitParticles(this.playerX, this.playerY, '#ef4444', 30);
+    this.spawnHitParticles(this.playerX, this.playerY, '#a855f7', 20);
+  }
+
+  private drawMaster() {
+    // 1. Draw Tether Links between linked enemies
+    this.tetherLinks.forEach(link => {
+      const source = this.enemies.find(e => e.id === link.sourceEnemyId);
+      const target = this.enemies.find(e => e.id === link.targetEnemyId);
+      if (source && target) {
+        this.ctx.save();
+        this.ctx.strokeStyle = '#ef4444';
+        this.ctx.lineWidth = 2;
+        this.ctx.shadowBlur = 10;
+        this.ctx.shadowColor = '#dc2626';
+        
+        this.ctx.beginPath();
+        this.ctx.moveTo(source.x, source.y);
+        this.ctx.lineTo(target.x, target.y);
+        this.ctx.stroke();
+
+        // Energy knot at midpoint
+        const midX = (source.x + target.x) / 2;
+        const midY = (source.y + target.y) / 2;
+        this.ctx.fillStyle = '#f87171';
+        this.ctx.beginPath();
+        this.ctx.arc(midX, midY, 4, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.restore();
+      }
+    });
+
+    // 2. Draw Overload Beam from Master to Player
+    if (this.masterOverloadTimer > 0) {
+      this.ctx.save();
+      this.ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
+      this.ctx.lineWidth = 4;
+      this.ctx.shadowBlur = 15;
+      this.ctx.shadowColor = '#f87171';
+
+      this.ctx.beginPath();
+      this.ctx.moveTo(this.masterX, this.masterY);
+      this.ctx.lineTo(this.playerX, this.playerY);
+      this.ctx.stroke();
+      this.ctx.restore();
+    }
+
+    // 3. Draw Master Entity
+    this.ctx.save();
+    this.ctx.translate(this.masterX, this.masterY);
+
+    // Dark crimson radial aura
+    const gradient = this.ctx.createRadialGradient(0, 0, 5, 0, 0, this.masterRadius * 2.2);
+    gradient.addColorStop(0, 'rgba(220, 38, 38, 0.6)');
+    gradient.addColorStop(0.6, 'rgba(126, 34, 206, 0.25)');
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    
+    this.ctx.fillStyle = gradient;
+    this.ctx.beginPath();
+    this.ctx.arc(0, 0, this.masterRadius * 2.2, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    // Outer Mantle (Dark slate core)
+    this.ctx.fillStyle = '#020617';
+    this.ctx.beginPath();
+    this.ctx.arc(0, 0, this.masterRadius, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    // Mantle Trim (Deep red ring)
+    this.ctx.strokeStyle = '#991b1b';
+    this.ctx.lineWidth = 2.5;
+    this.ctx.stroke();
+
+    // Inner Hood Shadow
+    this.ctx.fillStyle = '#000000';
+    this.ctx.beginPath();
+    this.ctx.arc(0, 0, this.masterRadius * 0.65, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    // Face rotation towards player
+    const angle = Math.atan2(this.playerY - this.masterY, this.playerX - this.masterX);
+    this.ctx.rotate(angle);
+
+    // Master Crimson Glowing Eyes
+    this.ctx.fillStyle = '#f87171';
+    this.ctx.shadowBlur = 8;
+    this.ctx.shadowColor = '#ef4444';
+    this.ctx.beginPath();
+    this.ctx.arc(this.masterRadius * 0.35, -this.masterRadius * 0.22, 3, 0, Math.PI * 2);
+    this.ctx.arc(this.masterRadius * 0.35, this.masterRadius * 0.22, 3, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    this.ctx.restore();
   }
 }

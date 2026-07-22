@@ -428,6 +428,78 @@ class AudioManager {
     osc.stop(now + 1.2);
   }
 
+  playMasterTether() {
+    if (!this.enabled) return;
+    this.init();
+    this.resume();
+    if (!this.ctx || !this.masterGain) return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(523.25, now);
+    osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.15);
+
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc.start(now);
+    osc.stop(now + 0.2);
+  }
+
+  playMasterOverload() {
+    if (!this.enabled) return;
+    this.init();
+    this.resume();
+    if (!this.ctx || !this.masterGain) return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(440, now);
+    osc.frequency.linearRampToValueAtTime(880, now + 0.3);
+
+    gain.gain.setValueAtTime(0.3, now);
+    gain.gain.linearRampToValueAtTime(0.01, now + 0.35);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc.start(now);
+    osc.stop(now + 0.35);
+  }
+
+  playMasterIntervention() {
+    if (!this.enabled) return;
+    this.init();
+    this.resume();
+    if (!this.ctx || !this.masterGain) return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(120, now);
+    osc.frequency.exponentialRampToValueAtTime(40, now + 0.6);
+
+    gain.gain.setValueAtTime(0.5, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc.start(now);
+    osc.stop(now + 0.6);
+  }
+
   playGameOver() {
     if (!this.enabled) return;
     this.init();

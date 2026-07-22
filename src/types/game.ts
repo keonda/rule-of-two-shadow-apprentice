@@ -129,3 +129,20 @@ export interface Wall {
   width: number;
   height: number;
 }
+
+export interface TetherLink {
+  id: string;
+  sourceEnemyId: string;
+  targetEnemyId: string;
+  duration: number; // remaining frames
+}
+
+export interface MasterState {
+  x: number;
+  y: number;
+  isOverloading: boolean;
+  overloadTimer: number;
+  interventionCooldown: number;
+  maxInterventionCooldown: number;
+  activeTethersCount: number;
+}

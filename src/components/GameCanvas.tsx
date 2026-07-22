@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { PlayerStats } from '../types/game';
+import { PlayerStats, MasterState } from '../types/game';
 import { ShadowApprenticeGame } from '../game/engine';
 import { Zap, Move, ShieldAlert, Award } from 'lucide-react';
 
 interface GameCanvasProps {
   isPaused: boolean;
-  onGameStats: (stats: PlayerStats, health: number, energy: number, score: number, wave: number, comboCount: number) => void;
+  onGameStats: (stats: PlayerStats, health: number, energy: number, score: number, wave: number, comboCount: number, masterState?: MasterState) => void;
   onUpgradeChoice: (choices: { id: string; name: string; description: string }[]) => void;
   onMasterTrialDefeated: () => void;
   onGameOver: (score: number, wave: number, upgrades: string[]) => void;
@@ -77,8 +77,8 @@ export default function GameCanvas({
     // Create new game instance
     const game = new ShadowApprenticeGame(
       canvas,
-      (stats, health, energy, score, wave, comboCount) => {
-        onGameStatsRef.current(stats, health, energy, score, wave, comboCount);
+      (stats, health, energy, score, wave, comboCount, masterState) => {
+        onGameStatsRef.current(stats, health, energy, score, wave, comboCount, masterState);
       },
       () => {
         // Wave complete - trigger upgrade choice
